@@ -223,21 +223,22 @@ void serve_static(int fd, char *filename, int filesize)
   /* 연결 식별자 fd에게 요청받은 파일의 copy본 전송 */
   /* mmap : requested file을 가상 메모리 영역과 map - 9.8절? */
   srcfd = Open(filename, O_RDONLY, 0); // 읽기 전용, 파일 시스템의 기본 접근권한(파일의 디렉토리의 기본 퍼미션) 사용
-  // srcp  = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-  // //          적절한 곳     읽기만      변경내용 공유X(사본) 파일의 시작부분부터(파일전체매핑)
+  srcp  = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+  //          적절한 곳     읽기만      변경내용 공유X(사본) 파일의 시작부분부터(파일전체매핑)
 
-  // /* 파일을 닫고 실제 파일을 클라이언트에게 전송 */
-  // Close(srcfd);
-  // Rio_writen(fd, srcp, filesize);
+  /* 파일을 닫고 실제 파일을 클라이언트에게 전송 */
+  Close(srcfd);
+  Rio_writen(fd, srcp, filesize);
 
-  // // 가상 메모리 영역 free 
-  // Munmap(srcp, filesize);
+  // 가상 메모리 영역 free 
+  Munmap(srcp, filesize);
 
-  srcp = (char*)malloc(filesize); // 파일을 복사할 공간할당받고
-  Rio_readn(srcfd, srcp, filesize);   // 공간(srcp)에 파일을 복사하고
-  Rio_writen(fd, srcp, filesize);     // 이를 fd에 쓴다
+  /* Mmap대신 malloc 사용 */
+  // srcp = (char*)malloc(filesize); // 파일을 복사할 공간할당받고
+  // Rio_readn(srcfd, srcp, filesize);   // 공간(srcp)에 파일을 복사하고
+  // Rio_writen(fd, srcp, filesize);     // 이를 fd에 쓴다
 
-  free(srcp); // 공간 free
+  // free(srcp); // 공간 free
 }
 
 /* TINY의 동적 컨텐츠 제공 방법 : child 프로세스 fork하고 -> child의 context에서 CGI프로그램 실행 */

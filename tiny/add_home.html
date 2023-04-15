@@ -1,0 +1,35 @@
+<html>
+<head><title>adder</title></head>
+<body>
+    <form id="user-input-form">
+		<label for="input1">Val 1: </label>
+		<input type="text" id="input1">
+		<br>
+		<label for="input2">Val 2: </label>
+		<input type="text" id="input2">
+		<br>
+		<input type="buttom" value="sum" onclick="sendRequest()">
+	</form>
+
+	<div id="result"></div>
+</body>
+
+<script>
+	function sendRequest() {
+		const value1 = document.getElementById('input1').value;
+		const value2 = document.getElementById('input2').value;
+		const url = `/cgi-bin/adder?${encodeURIComponent(value1)}&${encodeURIComponent(value2)}`;
+		
+		fetch(url)
+			.then(response => response.text())
+			.then(data => {
+				const resultDiv = document.getElementById('result');
+				resultDiv.innerHTML = `${data}`;
+			})
+			.catch(error => {
+				console.error('Error:', error);
+			});
+	}
+</script>
+
+</html>

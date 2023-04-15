@@ -744,6 +744,7 @@ void V(sem_t *sem)
 
 /*
  * rio_readn - Robustly read n bytes (unbuffered)
+ fd의 현재 파일 -> usrbuf로 최대 n바이트 전송
  */
 /* $begin rio_readn */
 ssize_t rio_readn(int fd, void *usrbuf, size_t n) 
@@ -770,6 +771,7 @@ ssize_t rio_readn(int fd, void *usrbuf, size_t n)
 
 /*
  * rio_writen - Robustly write n bytes (unbuffered)
+ usrbuf -> fd로 n바이트 전송
  */
 /* $begin rio_writen */
 ssize_t rio_writen(int fd, void *usrbuf, size_t n) 
@@ -866,6 +868,7 @@ ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 
 /* 
  * rio_readlineb - Robustly read a text line (buffered)
+    rp에서 읽어서 -> usrbuf로 복사
  */
 /* $begin rio_readlineb */
 ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen) 
