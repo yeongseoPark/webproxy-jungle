@@ -30,8 +30,9 @@ int main(void) {
   printf("Connection: close\r\n");
   printf("Content-length: %d\r\n", (int)strlen(content));
   printf("Content-type: text/html\r\n\r\n");
+  /* 이 위까지가 응답 헤더 */
   printf("%s", content);
-  fflush(stdout);
+  fflush(stdout); // cgi 프로그램이 출력으로 쓰는것은 클라이언트에게 직접 간다
   
   exit(0);
 }
