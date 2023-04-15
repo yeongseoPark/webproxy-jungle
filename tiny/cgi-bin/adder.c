@@ -11,7 +11,7 @@ int main(void) {
 
   if ((buf = getenv("QUERY_STRING")) != NULL) {
     p = strchr(buf, '&');
-    *p = '\0';
+    *p = '\0'; // 이게 없으면 ?3&4 로 인자가 들어왔을때, arg1에 3&4가 들어가게 됨(3이 아니라)
     strcpy(arg1, buf);
     strcpy(arg2, p+1);
     n1 = atoi(arg1);
