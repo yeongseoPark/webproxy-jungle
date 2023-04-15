@@ -11,9 +11,9 @@
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize);
+void serve_static(int fd, char *filename, int filesize, int is_get);
+void serve_dynamic(int fd, char *filename, char *cgiargs, int is_get);
 void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
 
@@ -48,6 +48,7 @@ int main(int argc, char **argv) {
 void doit(int fd) 
 {
   int is_static;
+  int is_get; // GET메서드와 HEAD메서드 비교
   struct stat sbuf;
   char buf[MAXLINE] , method[MAXLINE], uri[MAXLINE], version[MAXLINE];
   char filename[MAXLINE], cgiargs[MAXLINE];
@@ -62,14 +63,21 @@ void doit(int fd)
   // method, uri, version 저장
   sscanf(buf, "%s %s %s", method, uri, version); // scanf인데 입력대상이 표준입력이 아닌, buf
 
-  /* GET이 아닌 메소드에 대한 에러메시지 */
-  if (strcasecmp(method, "GET")) { // 대소문자 구분X 스트링 비교
+  /* GET과 HEAD가 아닌 메소드에 대한 에러메시지 */
+  if (strcasecmp(method, "GET") != 0 && strcasecmp(method, "HEAD") != 0) { // 대소문자 구분X 스트링 비교
     clienterror(fd, method, "501", "Not Implemented", "Tiny does not implement this method");
     return;
   }
   /* 읽어들이고, 다른 요청헤더들을 무시 */
   read_requesthdrs(&rio);
 
+  /* GET인지 HEAD인지 확인 */
+  if (!strcmp(method, "GET")) {
+    is_get = 1;
+  } else {
+    is_get = 0;
+  }
+  
   /* URI에 대한 CGI 인자 분석 - Parse URI */
   /* 정적 컨텐츠에 대한 요청? 동적 컨텐츠에 대한 요청? 플래그 설정 */
   is_static = parse_uri(uri, filename, cgiargs);
@@ -87,7 +95,7 @@ void doit(int fd)
       return;
     }
 
-    serve_static(fd, filename, sbuf.st_size);
+    serve_static(fd, filename, sbuf.st_size, is_get);
   }
   /* 동적 컨텐츠 요청  */
   else {
@@ -97,7 +105,7 @@ void doit(int fd)
     }
 
     /* 실행 가능시 동적 컨텐츠 서비스 */
-    serve_dynamic(fd, filename, cgiargs);
+    serve_dynamic(fd, filename, cgiargs, is_get);
   }
 }
 
@@ -202,7 +210,7 @@ void get_filetype(char *filename, char *filetype)
 /* TINY가 제공하는 정적 컨텐츠 : HTML, 무형식 텍스트, GIF, PNG, JPEG
   - body에 local file의 내용이 담긴 HTTP응답 보냄
  */
-void serve_static(int fd, char *filename, int filesize)
+void serve_static(int fd, char *filename, int filesize, int is_get)
 {
   int srcfd;
   char *srcp, filetype[MAXLINE], buf[MAXBUF];
@@ -220,6 +228,11 @@ void serve_static(int fd, char *filename, int filesize)
   printf("Response headers:\n");
   printf("%s", buf);
 
+  /* HEAD메서드면 여기서 멈춤 */
+  if (!is_get) {
+    return;
+  }
+
   /* 연결 식별자 fd에게 요청받은 파일의 copy본 전송 */
   /* mmap : requested file을 가상 메모리 영역과 map - 9.8절? */
   srcfd = Open(filename, O_RDONLY, 0); // 읽기 전용, 파일 시스템의 기본 접근권한(파일의 디렉토리의 기본 퍼미션) 사용
@@ -236,13 +249,14 @@ void serve_static(int fd, char *filename, int filesize)
   /* Mmap대신 malloc 사용 */
   // srcp = (char*)malloc(filesize); // 파일을 복사할 공간할당받고
   // Rio_readn(srcfd, srcp, filesize);   // 공간(srcp)에 파일을 복사하고
+  // Close(srcfd);                       // 파일을 닫아줘야 됨!!!!! 
   // Rio_writen(fd, srcp, filesize);     // 이를 fd에 쓴다
 
   // free(srcp); // 공간 free
 }
 
 /* TINY의 동적 컨텐츠 제공 방법 : child 프로세스 fork하고 -> child의 context에서 CGI프로그램 실행 */
-void serve_dynamic(int fd, char *filename, char *cgiargs)
+void serve_dynamic(int fd, char *filename, char *cgiargs, int is_get)
 {
   char buf[MAXLINE], *emptylist[] = { NULL };
 
@@ -251,6 +265,11 @@ void serve_dynamic(int fd, char *filename, char *cgiargs)
   Rio_writen(fd, buf, strlen(buf));
   sprintf(buf, "Server: Tiny Web Server\r\n");
   Rio_writen(fd, buf, strlen(buf));
+
+  /* HEAD메서드면 여기서 멈춤 */
+  if (!is_get) {
+    return;
+  }
 
   /* CGI 프로그램이 나머지 응답 보내야 함 */
   /* child process fork */
