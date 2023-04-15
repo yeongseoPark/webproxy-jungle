@@ -78,7 +78,6 @@ void doit(int fd)
     return;
   }
 
-  printf("%s", cgiargs);
 
   /* 정적 컨텐츠 요청 - 정규 파일(ISREG) & 읽기 권한 검증(IRUSR- 사용자가 파일을 읽을 수 있음) */
   if (is_static) {
@@ -147,6 +146,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 {
   char *ptr;
   /* URI를 파일네임 / optional CGI인자 문자열로 parse */
+  printf("유알아이 %s\n", uri);
 
   /* 정적 컨텐츠일시, CGI 인자 문자열 지우고, URI를 연관된 linux 경로로 편경 */
   if (!strstr(uri, "cgi-bin")) { // uri 안에 "cgi-bin"이라는 문자열이 없다면 static content
@@ -161,7 +161,6 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 
   /* 동적 컨텐츠 요청 : CGI 인자 추출 */
   else {
-    printf("here");
     ptr = index(uri, '?'); // 파일이름과 , cgi인자 구분하는 ?
     if (ptr) {
       strcpy(cgiargs, ptr+1);
@@ -191,6 +190,9 @@ void get_filetype(char *filename, char *filetype)
 
   else if (strstr(filename, ".jpg"))
     strcpy(filetype, "image/jpeg");
+
+  else if (strstr(filename, ".mp4"))
+    strcpy(filetype, "audio/mp4");
 
   else
     strcpy(filetype, "text/plain");
