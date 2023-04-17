@@ -19,6 +19,7 @@ void check_validHeader(int fd, rio_t *rp, char* hostname);
 void parse_uri(char* uri, char* hostname, char* path, int* port);
 void make_header(char* http_header, char* hostname, char* path, rio_t* client_rio);
 int connect_server(char* hostname, int port);
+void* start_thread(void *arg);
 
 /* 
   Pt1. Sequential
@@ -29,22 +30,35 @@ int connect_server(char* hostname, int port);
   4. 서버의 응답을 읽고 클라이언트에게 forward
 */
 int main(int argc, char **argv) {
-  int listenfd, connfd;
+  int listenfd;
+  int *connfd;
   char hostname[MAXLINE], port[MAXLINE];
-  __socklen_t clientlen;
+  socklen_t clientlen;
   struct sockaddr_storage clientaddr;
+  // size_t tid_p = 0;
 
   if (argc != 2) {
     fprintf(stderr, "Usage: %s <port>\n", argv[0]);
     exit(1);
   }
 
-  // 1.
   listenfd = Open_listenfd(argv[1]);
 
+  /* Pt2. Dealing with concurrent request 
+    - 여러 요청을 동시에 처리할 수 있어야 함
+    - 가능한 방안들
+    a. 새 연결 요청 처리위해서 새 쓰레드 생성
+    b. prethreaded server (12.5.5)
+
+    - 메모리 leak을 막기 위해 쓰레드는 detached mode에서 동작해야 함: 쓰레드의 실행이 부모 프로세스와 분리 
+      - 스레드가 실행을 마치면, 부모가 자동으로 스레드를 종료하는 것이 아니라, 스레드가 스스로를 종료함
+  */
+
   while (1) {
+    pthread_t tid;
     clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); // 클라이언트와의 통신 수립, connection descriptor반환
+    connfd = Malloc(sizeof(int));
+    *connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); // 클라이언트와의 통신 수립, connection descriptor반환
 
     /* 여기서의 hostname과 port는 클라이언트 그 자체! 의 hostname과 port
        클라이언트 소켓 주소 구조체를 가지고 hostname과 port를 채움 
@@ -52,14 +66,19 @@ int main(int argc, char **argv) {
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
 
     printf("Accepted connection from (%s, %s)\n", hostname, port);
-
-    // 2~4.
-    do_proxy(connfd);
-
-    Close(connfd);
+    
+    Pthread_create(&tid, NULL, start_thread, connfd);
   }
 }
 
+void* start_thread(void *arg) {
+  int connfd = *((int *)arg);
+  Pthread_detach(Pthread_self());
+  Free(arg);
+  do_proxy(connfd);
+  Close(connfd);
+  return NULL;
+}
 
 void do_proxy(int connfd) { // fd는 클라이언트와 수립된 descriptor
   int serverFd; // 엔드서버로의 descriptor
@@ -231,5 +250,4 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, buf, strlen(buf));
   Rio_writen(fd, body, strlen(body));
 }
-
 
