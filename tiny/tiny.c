@@ -58,7 +58,7 @@ void doit(int fd)
   Rio_readinitb(&rio, fd); // rio 초기화
   Rio_readlineb(&rio, buf, MAXLINE); // buf에 rio의 값을 씀
   printf("Request headers :\n");
-  printf("%s", buf); // 요청헤더 출력
+  printf("버프 %s", buf); // 요청헤더 출력
 
   // method, uri, version 저장
   sscanf(buf, "%s %s %s", method, uri, version); // scanf인데 입력대상이 표준입력이 아닌, buf
@@ -81,7 +81,7 @@ void doit(int fd)
   /* URI에 대한 CGI 인자 분석 - Parse URI */
   /* 정적 컨텐츠에 대한 요청? 동적 컨텐츠에 대한 요청? 플래그 설정 */
   is_static = parse_uri(uri, filename, cgiargs);
-  if (stat(filename, &sbuf) < 0) { // 파일의 정보 얻는 함수, filename의 상태 얻어와서 stat구조체인 sbuf에 채워넣음, 성공시 0 / 실패시 -1 반환
+  if (stat(filename, &sbuf) < 0) { // 파일의 정보 얻는 함수, filename을 현재 디렉토리에서 찾아서 ,filename의 상태 얻어와서 stat구조체인 sbuf에 채워넣음, 성공시 0 / 실패시 -1 반환
     clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file"); // 못찾음
     return;
   }
@@ -154,7 +154,6 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
 {
   char *ptr;
   /* URI를 파일네임 / optional CGI인자 문자열로 parse */
-  printf("유알아이 %s\n", uri);
 
   /* 정적 컨텐츠일시, CGI 인자 문자열 지우고, URI를 연관된 linux 경로로 편경 */
   if (!strstr(uri, "cgi-bin")) { // uri 안에 "cgi-bin"이라는 문자열이 없다면 static content
@@ -288,3 +287,4 @@ void serve_dynamic(int fd, char *filename, char *cgiargs, int is_get)
   /* parent는 자식이 종료될때까지 기다림, 종료 상태정보 확인하고 자식이 사용하던 시스템 리소스 해제 */
   wait(NULL); 
 }
+

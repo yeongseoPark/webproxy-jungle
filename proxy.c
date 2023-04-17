@@ -25,7 +25,7 @@ int connect_server(char* hostname, int port);
   - GET처리
   1. 커맨드라인으로 받은 포트로부터의 요청을 listen
   2. Connection이 수립되면, 요청을 읽고 parse
-  3. 유효하면 적절한 웹서버와 connection설립하고 클라이언트가 특정한 object를 요청(이때 지켜야하는 헤더 규약 있다)
+  3. 해당 요청을 가지고, 적절한 웹서버와 connection설립하고 클라이언트가 특정한 object를 요청(이때 지켜야하는 헤더 규약 있다)
   4. 서버의 응답을 읽고 클라이언트에게 forward
 */
 int main(int argc, char **argv) {
@@ -84,9 +84,6 @@ void do_proxy(int connfd) { // fd는 클라이언트와 수립된 descriptor
     return;
   }
 
-  /* 요청 헤더가 유효한지 확인 */
-  // check_validHeader(fd, &rio, hostname);
-
   /* 프록시에서 서버로 보낼 정보 파싱 - uri에서 hostname, path, port를 꺼내서 채운다 */
   parse_uri(uri, hostname, path, &port);
   printf("호스트 : %s\n", hostname);
@@ -138,6 +135,8 @@ void parse_uri(char* uri, char* hostname, char* path, int* port) {
 
   /* port와 path를 parse */
   pPos = strstr(hPos, ":");
+   // 여기서 strstr의 첫번째 인자를 uri로 두면, http://~~ 와 같은 요청이 들어왔을때
+   // pPos를 http바로 다음 : 위치로 잡게됨
   if (pPos != NULL) {  // 따로 지정된 포트가 있음 
     *pPos = '\0';
     sscanf(hPos, "%s", hostname);
@@ -179,12 +178,6 @@ void make_header(char* final_header, char* hostname, char* path, rio_t* client_r
       break; // '\r\n' 이면 끝 
     }
 
-    // if (strncasecmp(buf, "Host", strlen("Host"))) 
-    // {
-    //   strcpy(host_header, buf);
-    //   continue;
-    // }
-
     /* 얘네는 정해진 형식대로 채워줄거임 */
     if(strncasecmp(buf, "User-Agent", strlen("User-Agent")) 
       && strncasecmp(buf, "Connection", strlen("Connection"))
@@ -192,10 +185,6 @@ void make_header(char* final_header, char* hostname, char* path, rio_t* client_r
         strcat(other, buf); // 따라서 정해진 형식없는 애들만 other에 넣어줌(이어붙이기)
       }
   }
-
-  // if (!host_header) { // 호스트헤더가 따로 들어오지 않으면, 요청들어온 uri의 호스트헤더 쓰면 됨
-  //   sprintf(host_header, "Host: %s\r\n" , hostname);
-  // }
 
   /* 최종 요청 헤더의 모습 */
   sprintf(final_header, "%s%s%s%s%s%s%s",
@@ -214,7 +203,7 @@ void make_header(char* final_header, char* hostname, char* path, rio_t* client_r
 int connect_server(char* hostname, int port) {
   int serverFd;
   char portc[MAXLINE];
-  sprintf(portc, "%d", port);
+  sprintf(portc, "%d", port); // int 인 port를 문자열로변경
 
   serverFd = open_clientfd(hostname, portc);
 
@@ -243,64 +232,4 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, body, strlen(body));
 }
 
-void check_validHeader(int fd, rio_t *rp, char* hostname) {
-  char buf[MAXLINE];
-  char* p;
-  int check = 0; // Host, User-Agent, Connection, Proxy-Connection 모두 있는지 확인
-
-  Rio_readlineb(rp, buf, MAXLINE);
-  while (strcmp(buf, "\r\n")) {
-
-  // Host헤더 == hostname(main의)확인 
-    if (strstr(buf, "Host")) {
-      p = strchr(buf, ':');
-      p++;
-
-      if(strcmp(p, hostname)) {
-        clienterror(fd, "Hostname", "400" ,"Bad Request", "Wrong Hostname!");
-      }
-      check += 1;
-    }
-  
-  // user-Agent헤더 == user_agent_hdr 확인
-    else if (strstr(buf, "User-Agent")) {
-      p = strchr(buf, ':');
-      p += 2;
-
-      if (strcmp(p, user_agent_hdr)) {
-        clienterror(fd, "user_agent_header", "400", "Bad Request", "unsupported user_agent_header");
-      }
-      check += 1;
-    } 
-  
-  // Connection헤더 == Connection: close 확인
-    else if (strstr(buf, "Connection")) {
-      p = strchr(buf, ':');
-      p += 2;
-
-      if (strcmp(p, "close")) {
-        clienterror(fd, "connection", "400", "Bad Request", "connection header should be close");
-      }
-      check += 1;
-    }
-  
-  // Proxy-Connection: close 확인
-    else if (strstr(buf, "Proxy-Connection")) {
-      p = strchr(buf, ':');
-      p += 2;
-
-      if (strcmp(p, "close")) {
-        clienterror(fd, "connection", "400", "Bad Request", "proxy-connection header should be close");
-      }
-      check += 1;
-    }
-
-    Rio_readlineb(rp, buf, MAXLINE);
-  } // end of while
-
-  /* 필요한 헤더 중 일부가 없음 */
-  if (check < 4) {
-    clienterror(fd, "Request Header", "400", "Bad Request", "missing crucial header");
-  }
-}
 
