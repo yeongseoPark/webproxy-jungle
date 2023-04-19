@@ -44,6 +44,8 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  Signal(SIGPIPE, SIG_IGN); // 프로세스가 닫히거나, 끊긴 파이프에 쓰기 요청을 할 경우 발생하는 오류인 SIGPIPE를 무시하고 서버를 계속 동작
+
   listenfd = Open_listenfd(argv[1]);
 
   /* Pt2. Dealing with concurrent request 

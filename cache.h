@@ -18,7 +18,9 @@ typedef struct cache_list {
     // reader개수, 세마포어 필요한데...
     int readcnt; // 현재 읽고 있는 사람수
     sem_t r; // r은 readcnt에 접근하는 세마포어 
-    sem_t w; // w는 크리티컬 섹션에 대한 접근 제어
+    sem_t w; // w는 크리티컬 섹션에 대한 접근 제어    
+    sem_t serviceQueue; // request의 순서를 저장
+
 } cache_list;
 
 typedef struct thread_args { // Pthread_create가 void*만 인자로 받기때문에, 구조체 만들어서 얘에대한 포인터줘야함

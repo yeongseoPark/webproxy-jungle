@@ -8,8 +8,9 @@ cache_list *init_cache() {
     cur_list->left_space = MAX_CACHE_SIZE;
 
     cur_list->readcnt = 0;
-    Sem_init(&cur_list->r, 0, 1); // r과 w는 1로 초기화
+    Sem_init(&cur_list->r, 0, 1); 
     Sem_init(&cur_list->w, 0, 1);
+    Sem_init(&cur_list->serviceQueue , 0, 1);
 
     return cur_list;
 }
@@ -30,11 +31,14 @@ cache_object *init_object(char* id, unsigned int size) {
 
 /* 각 쓰레드는 동시에 cache에서 읽을 수 있다, 따라서 reader를 관리하는 readcnt변수에 대해서만 Mutual Exclusion 적용 */
 void open_reader(cache_list* cache) {
+    /* 쓰레드들이 공유리소스인 캐시에 접근하는 진입점에는 serviceQueue를 사용해 공정성 보장 */
+    P(&cache->serviceQueue);
     P(&cache->r); // a. readcnt를 사용하기 위해 잠그고
     cache->readcnt++;
     if (cache->readcnt == 1) { // 첫번째 reader야
         P(&cache->w); // reader가 한명이라도 존재하는 동안 writer는 못씀 
     }
+    V(&cache->serviceQueue);
     V(&cache->r); // b. 다시 풀어줌
 
     /* 이 뒤로는 reading이 일어나는 Critical section*/
@@ -42,6 +46,13 @@ void open_reader(cache_list* cache) {
 
 /* 읽기를 완료 */
 void close_reader(cache_list* cache) {
+    /* serviceQueue 세마포어는 쓰레드들 사이의 공정성을 유지하는 것이 목적이기 때문에, 
+        공유 리소스에(캐시)에 대한 접근이 시작되는 entry section에서만 사용
+        여기서는 이미 순서가 정해진채로, 반납만 하는거니까 serviceQueue 사용 X
+        => reader와 writer 모두 진입점에대해 serviceQueue를 사용하기 때문에, 둘간의 공정성이 보장된다
+        => 세마포어가 쓰레드를 block-release함에 있어 FIFO를 유지한다면, 처리 순서는 FIFO가 느슨하게 유지됨
+        => 왜냐, V가 P를 구제해주는거는 랜덤으로 이뤄지기에, 완전히 FIFO라 볼 수는 없기 때문
+    */
     P(&cache->r); 
     cache->readcnt--;
     if (cache->readcnt == 0) { // 마지막으로 나가는 reader가 writer를 열어줌
@@ -80,7 +91,9 @@ int search_cache(cache_list* list, char* id, void* object, unsigned int* size) {
     // 다 읽음
     close_reader(list);
     
+    P(&list->serviceQueue);
     P(&list->w); // 한번에 한 writer만 쓸 수 있다
+    V(&list->serviceQueue);
     searcher = delete_object(list, id);
     if (searcher == NULL) {
         V(&list->w); // 이 경우에 대해서도 lock 풀어줘야 함, write가 끝난거니까
@@ -98,7 +111,9 @@ int add_to_cache(cache_list *cache, char *id, char *data, unsigned int length) {
     memcpy(obj->data, data, length);
 
     // 쓸거니까 write lock걸기
+    P(&cache->serviceQueue);
     P(&(cache->w));
+    V(&cache->serviceQueue);
     
         /* 캐시 사이즈 키우기 */
     while (cache->left_space < obj->length) {
