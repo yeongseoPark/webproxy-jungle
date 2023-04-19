@@ -28,13 +28,12 @@ cache_object *init_object(char* id, unsigned int size) {
     return cur_object;
 }
 
-/* 각 쓰레드는 동시에 cache에서 읽을 수 있다 */
+/* 각 쓰레드는 동시에 cache에서 읽을 수 있다, 따라서 reader를 관리하는 readcnt변수에 대해서만 Mutual Exclusion 적용 */
 void open_reader(cache_list* cache) {
     P(&cache->r); // a. readcnt를 사용하기 위해 잠그고
-    // cache->readcnt = cache->readcnt + 1;
     cache->readcnt++;
     if (cache->readcnt == 1) { // 첫번째 reader야
-        P(&cache->w); // writer는 못씀
+        P(&cache->w); // reader가 한명이라도 존재하는 동안 writer는 못씀 
     }
     V(&cache->r); // b. 다시 풀어줌
 
@@ -44,10 +43,9 @@ void open_reader(cache_list* cache) {
 /* 읽기를 완료 */
 void close_reader(cache_list* cache) {
     P(&cache->r); 
-    // cache->readcnt = cache->readcnt - 1;
     cache->readcnt--;
-    if (cache->readcnt == 0) { // 마지막으로 나가는 reader
-        V(&cache->w); // 이제 writer가 쓸 수 있어요
+    if (cache->readcnt == 0) { // 마지막으로 나가는 reader가 writer를 열어줌
+        V(&cache->w); // 이제 P를 호출했는데 w가 0이어서 멈춰있던 writer중 하나는 쓸 수 있음
     }
     V(&cache->r);    
 }
@@ -60,6 +58,7 @@ void close_reader(cache_list* cache) {
     못찾으면 -1을 리턴한다
  */
 int search_cache(cache_list* list, char* id, void* object, unsigned int* size) {
+    // 읽을거니까 크리티컬 섹션(close와 얘 사이)에 대한 writer의 접근을 lock해놓음 
     open_reader(list);
 
     cache_object* searcher = list->start;
@@ -78,25 +77,27 @@ int search_cache(cache_list* list, char* id, void* object, unsigned int* size) {
         return -1;
     }
 
+    // 다 읽음
     close_reader(list);
     
-    P(&list->w);
+    P(&list->w); // 한번에 한 writer만 쓸 수 있다
     searcher = delete_object(list, id);
     if (searcher == NULL) {
-        V(&list->w);
+        V(&list->w); // 이 경우에 대해서도 lock 풀어줘야 함, write가 끝난거니까
         return -1;
     }
     add_to_end(searcher, list);
-    V(&list->w);
+    V(&list->w); // 정상적인 write 사이클이 다 끝난경우 lock풀어줌
 
     return 0;
 }
 
-/*  */
+/* LRU에 따라 연결리스트의 맨 끝에 삽입하고, 캐시 사이즈 키워주는 애 */
 int add_to_cache(cache_list *cache, char *id, char *data, unsigned int length) {
     cache_object *obj = init_object(id, length);
     memcpy(obj->data, data, length);
 
+    // 쓸거니까 write lock걸기
     P(&(cache->w));
     
         /* 캐시 사이즈 키우기 */
@@ -109,6 +110,7 @@ int add_to_cache(cache_list *cache, char *id, char *data, unsigned int length) {
 
     add_to_end(obj, cache);
 
+    // write lock 풀기
     V(&(cache->w));
 
     return 0;
@@ -116,30 +118,21 @@ int add_to_cache(cache_list *cache, char *id, char *data, unsigned int length) {
 
 /* 캐시에 object를 추가(맨끝에 ) */
 void add_to_end(cache_object* obj, cache_list* list) { // LRU를 위해 연결리스트의 끝에 연결?
-    // P(&(list->w));
 
     if (list->start != NULL) { // list가 아예 빈값이 아니면
         list->left_space -= obj->length;
-        // memmove(list->end->next, obj, sizeof(obj)+1);
         list->end->next = obj;
         list->end = obj;
-        // memmove(list->end, obj, sizeof(obj)+1);
     }
     else {
         list->left_space -= obj->length;
-        // memmove(list->start, obj, sizeof(obj)+1);
         list->start = obj;
-        // memmove(list->end, obj, sizeof(obj)+1);
         list->end = obj;
     }
-
-    // V(&(list->w));
 }
 
 /* id가 같은애를 찾아서 없애주면 됨 */
 cache_object * delete_object(cache_list* cache, char* query_id) {
-    // P(&(cache->w));
-
     cache_object* searcher = cache->start;
     cache_object* follower = NULL;
     while (searcher != NULL) {
@@ -148,17 +141,11 @@ cache_object * delete_object(cache_list* cache, char* query_id) {
             if (follower == NULL)  // 삭제하려는 값이 리스트의 시작
             {
                 cache->start = searcher->next;
-                // free(searcher);
                 free(follower);
             }
-            // else if (searcher->next == NULL) { // 삭제하려는 값이 리스트의 끝
-            //     follower->next = NULL;
-            //     free(sear)
-            // }
             else                 // 삭제하려는 값이 리스트의 중간또는 끝
             {
                 follower->next = searcher->next;
-                // free(searcher);
                 free(follower);
             }
 
@@ -169,21 +156,17 @@ cache_object * delete_object(cache_list* cache, char* query_id) {
                 cache->left_space += searcher->length;
             }
 
-            // V(&(cache->w));
             return searcher;
         }
         
         follower = searcher;
         searcher = searcher->next;
     }
-    // V(&(cache->w));
     return NULL;
 }
 
 /* LRU원칙에 따라 연결리스트의 첫번째 인자를 삭제 */
 int evict_object(cache_list * cache) {
-    // P(&(cache->w));
-
     cache_object* obj = cache->start;
     if (obj == NULL) 
         return -1;
@@ -198,23 +181,6 @@ int evict_object(cache_list * cache) {
     Free(obj->data);
     Free(obj);
 
-    // V(&(cache->w));
-
     return 0;
 }
 
-// /* cache를 삭제..? */
-// void destory_cache(cache_list* list) {
-//     free(list);
-// }
-
-
-/* Cache for Proxylab, CMU 15-213/513, Fall 2015
- * Author: Aleksander Bapst (abapst)
- *
- * Implements a linked-list cache for the proxy server using a LRU
- * cache eviction policy. LRU is approximated by moving recently read objects
- * to the end of the list, and evicting objects from the front of list.
- * Thread safety is implemented using semaphores to block writing to the cache
- * until no readers are present.
- */
