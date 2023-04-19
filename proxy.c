@@ -93,7 +93,8 @@ int main(int argc, char **argv) {
       void* start_thread(void *arg, cache_list* cache)
 
       이런식으로 호출과 선언해주고, 그냥 전역변수인 cache값을 사용할거라 생각했더니, 매번 쓰레드가 돌고나면 캐시값이 임의의 값으로 바뀌는 문제가 발생했음
-      따라서 void *인자 하나로 처리해주기 위해서, thread_args 구조체를 선언해서 이에 대한 포인터를 인자로 넘김  
+      따라서 void *인자 하나로 처리해주기 위해서, thread_args 구조체를 선언해서 이에 대한 포인터를 인자로 넘김 
+      => CSAPP 12.3.2에 써있음 
 
       왜 위의 방법에서 문제가 발생했냐면,  start_thread함수내에서 cache변수는 함수 인자로 전달된 값을 사용하는데,
       Pthread_create에서 cache를 변수로 전달하지 않았기에, 함수 내에서 접근하는 cache 변수에는 쓰레드마다 임의의 값이 들어가게 돼서 그럼.

@@ -19,11 +19,11 @@ MAX_CACHE=15
 HOME_DIR=`pwd`
 PROXY_DIR="./.proxy"
 NOPROXY_DIR="./.noproxy"
-TIMEOUT=50000
+TIMEOUT=5
 MAX_RAND=63000
 PORT_START=1024
 PORT_MAX=65000
-MAX_PORT_TRIES=20
+MAX_PORT_TRIES=10
 
 # List of text and binary files for the basic test
 BASIC_LIST="home.html
@@ -385,8 +385,6 @@ download_proxy $NOPROXY_DIR ${FETCH_FILE} "http://localhost:${tiny_port}/${FETCH
 # See if the proxy fetch succeeded by comparing it with the original
 # file in the tiny directory
 diff -q ./tiny/${FETCH_FILE} ${NOPROXY_DIR}/${FETCH_FILE}  &> /dev/null
-diff ./tiny/${FETCH_FILE} ${NOPROXY_DIR}/${FETCH_FILE}
-
 if [ $? -eq 0 ]; then
     cacheScore=${MAX_CACHE}
     echo "Success: Was able to fetch tiny/${FETCH_FILE} from the cache."
@@ -408,3 +406,4 @@ maxScore=`expr ${MAX_BASIC} + ${MAX_CACHE} + ${MAX_CONCURRENCY}`
 echo ""
 echo "totalScore: ${totalScore}/${maxScore}"
 exit
+
