@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "csapp.h"
+#include "cache.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -14,13 +15,14 @@ static const char *prox_conn_hdr = "Proxy-Connection: close\r\n";
 
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 
-void do_proxy(int fd);
+void do_proxy(int fd, cache_list* cache);
 void check_validHeader(int fd, rio_t *rp, char* hostname);
 void parse_uri(char* uri, char* hostname, char* path, int* port);
 void make_header(char* http_header, char* hostname, char* path, rio_t* client_rio);
 int connect_server(char* hostname, int port);
 void* start_thread(void *arg);
 
+cache_list* cache = NULL; 
 /* 
   Pt1. Sequential
   - GET처리
@@ -54,6 +56,23 @@ int main(int argc, char **argv) {
       - 스레드가 실행을 마치면, 부모가 자동으로 스레드를 종료하는 것이 아니라, 스레드가 스스로를 종료함
   */
 
+ /* Pt3. 캐싱 Web Object
+  - 서버에서 web Object 받고
+  - 클라이언트에 보냄과 동시에 메모리에 캐시 -> 일단은 host가 하나라고 가정하고..ㅋㅋ hostname을 따로 저장해주지 않고 구현해보자
+  - 따라서 동일 요청시에는 서버에 reconnect할 필요 X
+    1. 각 connection에 대한 버퍼 생성
+    2. 여기에 데이터 수집
+    3. 프록시가 수용할 수 있는 최대 데이터 사이즈 = MAX_CACHE_SIZE per 연결 + active connection 최대 개수 * MAX_OBJECT_SIZE
+  - 캐시에서 나가는(퇴거) 정책 : LRU(에 근접하는?)
+
+  - Synchronization:
+    - 캐시로의 접근은 thread-safe 해야함, 즉 race condition으로부터 자유롭게.
+    - 캐시에서 read는 여러 쓰레드가 동시에 할 수 있고
+    - 한 쓰레드만이 캐시에 write 할 수 있다
+    => partitioning, readers-writers-lock, semaphore 등을 고려해라
+ */
+  cache = init_cache(); /* 캐시: connection에서 쓸 캐시를 만듬 */
+
   while (1) {
     pthread_t tid;
     clientlen = sizeof(clientaddr);
@@ -62,25 +81,50 @@ int main(int argc, char **argv) {
 
     /* 여기서의 hostname과 port는 클라이언트 그 자체! 의 hostname과 port
        클라이언트 소켓 주소 구조체를 가지고 hostname과 port를 채움 
-     */
+    */
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
 
     printf("Accepted connection from (%s, %s)\n", hostname, port);
+
+   /* Pthread_create의 세번째 인자인 루틴함수는, void* 만을 인자로 받는다
+      근데, 내가 start_thread를 
+      Pthread_create(&tid, NULL, start_thread, connfd);
+
+      void* start_thread(void *arg, cache_list* cache)
+
+      이런식으로 호출과 선언해주고, 그냥 전역변수인 cache값을 사용할거라 생각했더니, 매번 쓰레드가 돌고나면 캐시값이 임의의 값으로 바뀌는 문제가 발생했음
+      따라서 void *인자 하나로 처리해주기 위해서, thread_args 구조체를 선언해서 이에 대한 포인터를 인자로 넘김  
+
+      왜 위의 방법에서 문제가 발생했냐면,  start_thread함수내에서 cache변수는 함수 인자로 전달된 값을 사용하는데,
+      Pthread_create에서 cache를 변수로 전달하지 않았기에, 함수 내에서 접근하는 cache 변수에는 쓰레드마다 임의의 값이 들어가게 돼서 그럼.
+      실제로 전역변수 cache는 바뀌지 않았다만, 함수 내에서 임의의 값을 사용했던 것.
+
+      왜냐, 내가 두번째 매개변수로 cache_list* cache를 적어두고, 이를 넘겨주지 않았기 때문
+      두번째 인자를 아예 없애줬더라면 어련히 전역변수인 cache를 썼을것..
+     */ 
+    thread_args *args = Malloc(sizeof(thread_args));
+    args->connfd = connfd;
+    args->cache = cache;
     
-    Pthread_create(&tid, NULL, start_thread, connfd);
+    Pthread_create(&tid, NULL, start_thread, args);
   }
 }
 
+// void* start_thread(void *arg, cache_list* cache) => 캐시 매번 초기화되는 선언 !
 void* start_thread(void *arg) {
-  int connfd = *((int *)arg);
+  thread_args *args = (thread_args*)arg;
+
+  int connfd = *(args->connfd);
+  cache_list *cache = args->cache; // 이게 없어도 알아서 전역변수인 cache를 사용함 
+
   Pthread_detach(Pthread_self());
   Free(arg);
-  do_proxy(connfd);
+  do_proxy(connfd, cache);
   Close(connfd);
   return NULL;
 }
 
-void do_proxy(int connfd) { // fd는 클라이언트와 수립된 descriptor
+void do_proxy(int connfd, cache_list* cache) { // fd는 클라이언트와 수립된 descriptor
   int serverFd; // 엔드서버로의 descriptor
   char buf[MAXLINE] , method[MAXLINE], uri[MAXLINE], version[MAXLINE];
   char hostname[MAXLINE], path[MAXLINE];
@@ -92,7 +136,6 @@ void do_proxy(int connfd) { // fd는 클라이언트와 수립된 descriptor
   /* 2. Client로부터 request받기 */
   Rio_readinitb(&client_rio, connfd); // rio 초기화
   Rio_readlineb(&client_rio, buf, MAXLINE); // buf에 rio의 값을 씀(클라이언트의 request)
-
 
   /* 요청 헤더에서 method, uri, version을 가져옴 */
   sscanf(buf, "%s %s %s", method, uri, version); 
@@ -109,6 +152,22 @@ void do_proxy(int connfd) { // fd는 클라이언트와 수립된 descriptor
   printf("패스 : %s\n", path);
   printf("포트 : %d\n", port);
 
+  /* 캐시: 캐시에 값이 있으면 그거를 그대로 돌려주면 된다 */
+  if (cache->start != NULL) {
+    printf("캐시 %c\n", cache->start->id);
+  }
+  else {
+    printf("없음\n");
+  }
+
+  char obj_data[100000];
+  unsigned int size;
+  if (search_cache(cache, path, (void*)obj_data, &size) == 0) {
+    Rio_writen(connfd, (void*)obj_data, size);
+
+    return; // 밑의 과정 안해도 된다
+  } 
+
   /* 서버로 보낼 요청 헤더 생성 - hostname, path, port를 가지고 만든다 */
   make_header(server_header, hostname, path,  &client_rio);
 
@@ -123,11 +182,37 @@ void do_proxy(int connfd) { // fd는 클라이언트와 수립된 descriptor
 
   // 서버로부터 응답을 받아 클라이언트에 전송
   size_t n;
+  size_t all_size = 0;
+  char cache_buf[100000] = {0,}; /* 문제 해결 : malloc(size(100000)) 으로 했더니 이상한 값이(이전 메모리영역의 값) cache_buf에 들어가는 문제가..*/
+  
+  /* malloc을 사용하고자 했다면 이렇게 memset으로 메모리를 초기화했어야...
+      char *cache_buf = malloc(sizeof(char) * 100000);
+      if (cache_buf == NULL) {
+        // 메모리 할당에 실패한 경우의 처리
+      }
+      memset(cache_buf, 0, sizeof(char) * 100000);
+  */
+
   while((n= Rio_readlineb(&server_rio, buf, MAXLINE)) != 0)
   {
     printf("proxy received %d bytes, then send them to client\n", n);
     // 서버의 응답을 클라이언트에게 forward
     Rio_writen(connfd, buf, n); // client와의 연결 소켓인 connfd에 쓴다 
+    all_size += n;
+    // printf("버프 : %s \n", buf);
+    sprintf(cache_buf, "%s%s", cache_buf, buf); // cache_buf에 전체 응답(헤더+본문)을 이어붙인다
+  }
+
+  /* 캐시: 캐시에 해당 값을 쓴다 - 위에서 캐시에서 해당값을 찾지 못했음 */
+  if (all_size <= MAX_OBJECT_SIZE) {
+    add_to_cache(cache, path, (cache_buf), all_size);
+  }
+
+  if (cache->start != NULL) {
+    printf("저장 이후 캐시 %c\n", cache->start->id);
+  }
+  else {
+    printf("저장 이후도 없음\n");
   }
 
   Close(serverFd);
@@ -250,4 +335,3 @@ void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longms
   Rio_writen(fd, buf, strlen(buf));
   Rio_writen(fd, body, strlen(body));
 }
-
